@@ -1,3 +1,5 @@
+// Package autocertdns provides autocertificate renewal from LetsEncrypt using
+// DNS-01 challenges.
 package autocertdns
 
 import (
