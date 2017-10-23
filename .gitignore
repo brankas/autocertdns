@@ -2,4 +2,4 @@
 *.key
 *.pem
 
-.godo-token
+.*token
