@@ -9,6 +9,11 @@ import (
 	"github.com/digitalocean/godo"
 )
 
+const (
+	// allowedRecordType is the allowed record provisioning type.
+	allowedRecordType = "TXT"
+)
+
 // Client wraps a DigitalOcean godo.Client.
 type Client struct {
 	*godo.Client
@@ -24,7 +29,7 @@ func New(c *godo.Client, domain string) *Client {
 // Provision creates a DNS record of typ, for the specified domain name and
 // with the value in token.
 func (c *Client) Provision(ctxt context.Context, typ, name, token string) error {
-	if typ != "TXT" {
+	if typ != allowedRecordType {
 		return errors.New("only TXT records are supported")
 	}
 
@@ -32,22 +37,18 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 	if !strings.HasSuffix(name, "."+c.domain) {
 		return errors.New("invalid domain")
 	}
-	name = name[:len(name)-len(c.domain)-1]
+	name = strings.TrimSuffix(name, "."+c.domain)
 	if name == "" {
 		return errors.New("invalid name")
 	}
 
 	// create dns record
 	_, _, err := c.Domains.CreateRecord(ctxt, c.domain, &godo.DomainRecordEditRequest{
-		Type: "TXT",
+		Type: allowedRecordType,
 		Name: name,
 		Data: token,
 	})
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 // Unprovision deletes the DNS record of typ, for the specified domain name,
@@ -55,7 +56,7 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 func (c *Client) Unprovision(ctxt context.Context, typ, name, token string) error {
 	var err error
 
-	if typ != "TXT" {
+	if typ != allowedRecordType {
 		return errors.New("only TXT records are supported")
 	}
 
@@ -63,7 +64,7 @@ func (c *Client) Unprovision(ctxt context.Context, typ, name, token string) erro
 	if !strings.HasSuffix(name, "."+c.domain) {
 		return errors.New("invalid domain")
 	}
-	name = name[:len(name)-len(c.domain)-1]
+	name = strings.TrimSuffix(name, "."+c.domain)
 	if name == "" {
 		return errors.New("invalid name")
 	}
@@ -76,16 +77,12 @@ func (c *Client) Unprovision(ctxt context.Context, typ, name, token string) erro
 
 	// find record and delete if TXT record and token matches
 	for _, record := range records {
-		if record.Name != name || record.Type != "TXT" || record.Data != token {
+		if record.Name != name || record.Type != allowedRecordType || record.Data != token {
 			continue
 		}
 
 		_, err = c.Domains.DeleteRecord(ctxt, c.domain, record.ID)
-		if err != nil {
-			return err
-		}
-
-		return nil
+		return err
 	}
 
 	return errors.New("record not deleted")
