@@ -183,3 +183,9 @@ func (m *Manager) Renew(ctxt context.Context) error {
 func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return nil, nil
 }
+
+// AcceptTOS is a util func that always returns true to indicate acceptance of
+// the underlying ACME server's Terms of Service during account registration.
+func AcceptTOS(string) bool {
+	return true
+}

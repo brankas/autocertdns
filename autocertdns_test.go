@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/digitalocean/godo"
-	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 
 	"github.com/brankas/autocertdns/godop"
@@ -22,7 +21,7 @@ func TestRenew(t *testing.T) {
 	}
 
 	m := &Manager{
-		Prompt:      autocert.AcceptTOS,
+		Prompt:      AcceptTOS,
 		CacheDir:    "cache",
 		Email:       "kenneth.shaw@brank.as",
 		Domain:      "aoeu-dev.brank.as",
