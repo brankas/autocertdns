@@ -1,13 +1,11 @@
 package autocertdns
 
 import (
+	"bytes"
 	"context"
 	"io/ioutil"
-	"strings"
+	"os"
 	"testing"
-
-	"github.com/digitalocean/godo"
-	"golang.org/x/oauth2"
 
 	"github.com/brankas/autocertdns/godop"
 )
@@ -15,37 +13,45 @@ import (
 func TestRenew(t *testing.T) {
 	ctxt := context.Background()
 
-	doClient, err := godoClient(ctxt)
+	token, err := getToken()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("no godo token available: %v", err)
+	}
+
+	// create godo (digital ocean) client
+	doClient, err := godop.New(
+		godop.WithDomain("brank.as"),
+		godop.FromClientToken(ctxt, token),
+		godop.WithLogf(t.Logf), godop.WithErrorf(t.Logf),
+	)
+	if err != nil {
+		t.Fatalf("could not create godo client: %v", err)
 	}
 
 	m := &Manager{
-		Prompt:      AcceptTOS,
-		CacheDir:    "cache",
-		Email:       "kenneth.shaw@brank.as",
-		Domain:      "aoeu-dev.brank.as",
-		Provisioner: godop.New(doClient, "brank.as"),
+		DirectoryURL: LetsEncryptStagingURL,
+		Prompt:       AcceptTOS,
+		CacheDir:     "cache",
+		Email:        "kenneth.shaw@brank.as",
+		Domain:       "long-test-hostname-forever-long.test.brank.as",
+		Provisioner:  doClient,
 	}
 
-	err = m.Renew(ctxt)
+	err = m.renew(ctxt)
 	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
+		t.Errorf("expected no error, got: %v", err)
 	}
 }
 
-func godoClient(ctxt context.Context) (*godo.Client, error) {
+// getToken checks the environment variable GODO_TOKEN and then looks in the
+// file on disk .godo-token
+func getToken() (string, error) {
+	if s := os.Getenv("GODO_TOKEN"); s != "" {
+		return s, nil
+	}
 	tok, err := ioutil.ReadFile(".godo-token")
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-
-	return godo.NewClient(oauth2.NewClient(
-		ctxt,
-		oauth2.StaticTokenSource(
-			&oauth2.Token{
-				AccessToken: strings.TrimSpace(string(tok)),
-			},
-		),
-	)), nil
+	return string(bytes.TrimSpace(tok)), nil
 }
