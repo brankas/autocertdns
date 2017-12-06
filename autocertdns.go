@@ -32,8 +32,8 @@ const (
 	// cache.
 	acmeKeyFile = "acme_account.key"
 
-	// acmeChallengDomainPrefix is the ACME challenge domain prefix.
-	acmeChallengDomainPrefix = "_acme-challenge."
+	// acmeChallengeDomainPrefix is the ACME challenge domain prefix.
+	acmeChallengeDomainPrefix = "_acme-challenge."
 
 	// keySuffix is the filename suffix for cached key files.
 	keySuffix = ".key"
@@ -208,11 +208,11 @@ func (m *Manager) renew(ctxt context.Context) error {
 	}
 
 	// provision TXT under _acme-challenge.<domain>
-	err = m.Provisioner.Provision(ctxt, "TXT", acmeChallengDomainPrefix+m.Domain, tok)
+	err = m.Provisioner.Provision(ctxt, "TXT", acmeChallengeDomainPrefix+m.Domain, tok)
 	if err != nil {
 		return m.errf("could not provision dns-01 TXT challenge: %v", err)
 	}
-	defer m.Provisioner.Unprovision(ctxt, "TXT", acmeChallengDomainPrefix+m.Domain, tok)
+	defer m.Provisioner.Unprovision(ctxt, "TXT", acmeChallengeDomainPrefix+m.Domain, tok)
 
 	// accept challenge
 	_, err = client.Accept(ctxt, challenge)
