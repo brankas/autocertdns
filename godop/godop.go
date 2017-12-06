@@ -79,9 +79,9 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 	})
 	if err != nil {
 		c.errf("unable to provision (type: %s, name: %s, token: %s): %v", typ, name, token, err)
-	} else {
+	} /*else {
 		c.logf("successfully provisioned (type: %s, name: %s, token: %s)", typ, name, token)
-	}
+	}*/
 
 	return err
 }
@@ -105,13 +105,13 @@ func (c *Client) Unprovision(ctxt context.Context, typ, name, token string) erro
 	}
 
 	// get current records
-	c.logf("retrieving records (type: %s, name: %s, token: %s)", typ, name, token)
+	//c.logf("retrieving records (type: %s, name: %s, token: %s)", typ, name, token)
 	records, _, err := c.Domains.Records(ctxt, c.domain, &godo.ListOptions{PerPage: 10000})
 	if err != nil {
 		c.errf("could not retrieve records (type: %s, name: %s, token: %s): %v", typ, name, token, err)
 		return err
 	}
-	c.logf("retrieved %d records (type: %s, name: %s, token: %s)", len(records), typ, name, token)
+	//c.logf("retrieved %d records (type: %s, name: %s, token: %s)", len(records), typ, name, token)
 
 	// find record and delete if TXT record and token matches
 	for _, record := range records {
@@ -123,9 +123,9 @@ func (c *Client) Unprovision(ctxt context.Context, typ, name, token string) erro
 		_, err = c.Domains.DeleteRecord(ctxt, c.domain, record.ID)
 		if err != nil {
 			c.errf("unable to unprovision (type: %s, name: %s, token: %s): %v", typ, name, token, err)
-		} else {
+		} /*else {
 			c.logf("successfully unprovisioned (type: %s, name: %s, token: %s)", typ, name, token)
-		}
+		}*/
 		return err
 	}
 

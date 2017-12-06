@@ -3,15 +3,20 @@
 package autocertdns
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -124,6 +129,12 @@ func (m *Manager) errf(s string, v ...interface{}) error {
 // Manager.DirCache, if that fails then an attempt will be made to create/renew
 // a certificate based on the Manager configuration.
 func (m *Manager) loadOrRenew(ctxt context.Context) error {
+	certPath := filepath.Join(m.CacheDir, m.Domain+certSuffix)
+	buf, err := ioutil.ReadFile(certPath)
+	if err == nil {
+		return m.load(buf)
+	}
+
 	return nil
 }
 
@@ -229,15 +240,38 @@ func (m *Manager) renew(ctxt context.Context) error {
 		return m.errf("could not create certificate signing request: %v", err)
 	}
 
-	// create certificate
+	// create and parse certificate
 	der, urlstr, err := client.CreateCert(ctxt, csr, 0, true)
 	if err != nil {
 		return m.errf("could not create certificate: %v", err)
 	}
+	leaf, err := parseCert(m.Domain, der, certKey)
+	if err != nil {
+		return m.errf("could not parse certificate: %v", err)
+	}
 
-	m.log("created certificate: %s", urlstr)
+	// encode certificate
+	buf := new(bytes.Buffer)
+	for _, b := range der {
+		pb := &pem.Block{Type: pemutil.Certificate.String(), Bytes: b}
+		if err := pem.Encode(buf, pb); err != nil {
+			return m.errf("could not encode certificate: %v", err)
+		}
+	}
 
-	der = der
+	// cache certificate
+	certPath := filepath.Join(m.CacheDir, m.Domain+certSuffix)
+	err = ioutil.WriteFile(certPath, buf.Bytes(), 0600)
+	if err != nil {
+		return m.errf("could not write to %s: %v", certPath, err)
+	}
+
+	m.log("created certificate (domain: %s, url: %s, expires: %s)", m.Domain, urlstr, leaf.NotAfter.Format(time.RFC3339))
+	m.cert = &tls.Certificate{
+		Certificate: der,
+		Leaf:        leaf,
+		PrivateKey:  certKey,
+	}
 
 	return nil
 }
@@ -347,4 +381,62 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 // the underlying ACME server's Terms of Service during account registration.
 func AcceptTOS(string) bool {
 	return true
+}
+
+// parseCert parses a cert chain provided as der argument and verifies the leaf, der[0],
+// corresponds to the private key, as well as the domain match and expiration dates.
+// It doesn't do any revocation checking.
+//
+// The returned value is the verified leaf cert.
+//
+// adapted from golang.org/x/crypto/acme/autocert.validCert
+func parseCert(domain string, der [][]byte, key crypto.Signer) (leaf *x509.Certificate, err error) {
+	// parse public part(s)
+	var n int
+	for _, b := range der {
+		n += len(b)
+	}
+	pub := make([]byte, n)
+	n = 0
+	for _, b := range der {
+		n += copy(pub[n:], b)
+	}
+	x509Cert, err := x509.ParseCertificates(pub)
+	if len(x509Cert) == 0 {
+		return nil, errors.New("no public key found")
+	}
+	// verify the leaf is not expired and matches the domain name
+	leaf = x509Cert[0]
+	now := time.Now()
+	if now.Before(leaf.NotBefore) {
+		return nil, errors.New("certificate is not valid yet")
+	}
+	if now.After(leaf.NotAfter) {
+		return nil, errors.New("expired certificate")
+	}
+	if err := leaf.VerifyHostname(domain); err != nil {
+		return nil, err
+	}
+	// ensure the leaf corresponds to the private key
+	switch pub := leaf.PublicKey.(type) {
+	case *rsa.PublicKey:
+		prv, ok := key.(*rsa.PrivateKey)
+		if !ok {
+			return nil, errors.New("private key type does not match public key type")
+		}
+		if pub.N.Cmp(prv.N) != 0 {
+			return nil, errors.New("private key does not match public key")
+		}
+	case *ecdsa.PublicKey:
+		prv, ok := key.(*ecdsa.PrivateKey)
+		if !ok {
+			return nil, errors.New("private key type does not match public key type")
+		}
+		if pub.X.Cmp(prv.X) != 0 || pub.Y.Cmp(prv.Y) != 0 {
+			return nil, errors.New("private key does not match public key")
+		}
+	default:
+		return nil, errors.New("unknown public key algorithm")
+	}
+	return leaf, nil
 }
