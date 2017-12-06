@@ -132,8 +132,10 @@ func (m *Manager) loadOrRenew(ctxt context.Context) error {
 	certPath := filepath.Join(m.CacheDir, m.Domain+certSuffix)
 	buf, err := ioutil.ReadFile(certPath)
 	if err == nil {
-		return m.load(buf)
+		//return m.load(buf)
 	}
+
+	buf = buf
 
 	return nil
 }
