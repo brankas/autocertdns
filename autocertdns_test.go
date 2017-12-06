@@ -35,6 +35,8 @@ func TestRenew(t *testing.T) {
 		Email:        "kenneth.shaw@brank.as",
 		Domain:       "long-test-hostname-forever-long.test.brank.as",
 		Provisioner:  doClient,
+		Logf:         t.Logf,
+		//Errorf:       t.Errorf,
 	}
 
 	err = m.renew(ctxt)

@@ -13,8 +13,6 @@ import (
 const (
 	// allowedRecordType is the allowed record provisioning type.
 	allowedRecordType = "TXT"
-
-	acmeChallengeDomainPrefix = ""
 )
 
 // Client wraps a DigitalOcean godo.Client.

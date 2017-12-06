@@ -1,9 +1,9 @@
 package godop
 
 import (
+	"bytes"
 	"context"
 	"io/ioutil"
-	"strings"
 
 	"github.com/digitalocean/godo"
 	"golang.org/x/oauth2"
@@ -36,7 +36,7 @@ func FromClientToken(ctxt context.Context, token string) Option {
 			ctxt,
 			oauth2.StaticTokenSource(
 				&oauth2.Token{
-					AccessToken: strings.TrimSpace(string(token)),
+					AccessToken: token,
 				},
 			),
 		)))(c)
@@ -47,12 +47,12 @@ func FromClientToken(ctxt context.Context, token string) Option {
 // token stored in file on disk.
 func FromClientTokenFile(ctxt context.Context, filename string) Option {
 	return func(c *Client) error {
-		tok, err := ioutil.ReadFile(".godo-token")
+		tok, err := ioutil.ReadFile(filename)
 		if err != nil {
 			return err
 		}
 
-		return FromClientToken(ctxt, string(tok))(c)
+		return FromClientToken(ctxt, string(bytes.TrimSpace(tok)))(c)
 	}
 }
 

@@ -5,31 +5,36 @@ package autocertdns
 import (
 	"context"
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/knq/pemutil"
-
 	"golang.org/x/crypto/acme"
 )
 
 const (
-	// AcmeKeyFile is the name of the ACME key file used with the directory
+	// acmeKeyFile is the name of the ACME key file used with the directory
 	// cache.
-	AcmeKeyFile = "acme_account.key"
+	acmeKeyFile = "acme_account.key"
 
-	// AcmeChallengeDomainPrefix is the ACME challenge domain prefix.
-	AcmeChallengeDomainPrefix = "_acme-challenge."
+	// acmeChallengDomainPrefix is the ACME challenge domain prefix.
+	acmeChallengDomainPrefix = "_acme-challenge."
+
+	// keySuffix is the filename suffix for cached key files.
+	keySuffix = ".key"
+
+	// certSuffix is the filename suffix for cached certificate files.
+	certSuffix = ".crt"
 
 	// LetsEncryptURL is the default ACME server URL.
 	LetsEncryptURL = acme.LetsEncryptURL
@@ -139,15 +144,10 @@ func (m *Manager) renew(ctxt context.Context) error {
 		return m.errf("must provide Provisioner")
 	}
 
-	store, err := m.cachedAccountPEM()
+	// load acme key
+	key, err := m.cachedKey(acmeKeyFile)
 	if err != nil {
-		return err
-	}
-
-	// grab private key
-	key, ok := store.ECPrivateKey()
-	if !ok {
-		return m.errf("expected ec private key")
+		return m.errf("could not load %s: %v", acmeKeyFile, err)
 	}
 
 	// create acme client
@@ -195,11 +195,11 @@ func (m *Manager) renew(ctxt context.Context) error {
 	}
 
 	// provision TXT under _acme-challenge.<domain>
-	err = m.Provisioner.Provision(ctxt, "TXT", AcmeChallengeDomainPrefix+m.Domain, tok)
+	err = m.Provisioner.Provision(ctxt, "TXT", acmeChallengDomainPrefix+m.Domain, tok)
 	if err != nil {
 		return m.errf("could not provision dns-01 TXT challenge: %v", err)
 	}
-	defer m.Provisioner.Unprovision(ctxt, "TXT", AcmeChallengeDomainPrefix+m.Domain, tok)
+	defer m.Provisioner.Unprovision(ctxt, "TXT", acmeChallengDomainPrefix+m.Domain, tok)
 
 	// accept challenge
 	_, err = client.Accept(ctxt, challenge)
@@ -215,10 +215,16 @@ func (m *Manager) renew(ctxt context.Context) error {
 		return m.errf("dns-01 challenge is invalid (has status %v)", authz.Status)
 	}
 
+	// grab domain key
+	certKey, err := m.cachedKey(m.Domain + keySuffix)
+	if err != nil {
+		return m.errf("could not load domain key: %v", err)
+	}
+
 	// create certificate signing request
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
 		Subject: pkix.Name{CommonName: m.Domain},
-	}, key)
+	}, certKey)
 	if err != nil {
 		return m.errf("could not create certificate signing request: %v", err)
 	}
@@ -236,56 +242,54 @@ func (m *Manager) renew(ctxt context.Context) error {
 	return nil
 }
 
-func (m *Manager) cachedAccountPEM() (pemutil.Store, error) {
-	var err error
-
-	keyfilePath := m.CacheDir + "/" + AcmeKeyFile
-	store := pemutil.Store{}
+// cachedKey retrieves a private key from disk, generating a new elliptic.P256
+// key if the file is not on disk.
+func (m *Manager) cachedKey(filename string) (*ecdsa.PrivateKey, error) {
+	keyfile := filepath.Join(m.CacheDir, filename)
 
 	// try to load cached credentials
-	err = store.LoadFile(keyfilePath)
+	store, err := pemutil.LoadFile(keyfile)
 	if err != nil && os.IsNotExist(err) {
 		store, err = pemutil.GenerateECKeySet(elliptic.P256())
 		if err != nil {
-			return nil, m.errf("could not generate ec key set: %v", err)
+			return nil, fmt.Errorf("could not generate ec key set: %v", err)
 		}
 		err = os.MkdirAll(m.CacheDir, 0700)
 		if err != nil {
-			return nil, m.errf("could not create cache directory: %v", err)
+			return nil, fmt.Errorf("could not create cache directory: %v", err)
 		}
-
-		var buf []byte
-		buf, err = store.Bytes()
+		err = store.WriteFile(keyfile)
 		if err != nil {
-			return nil, m.errf("could not generate PEM: %v", err)
-		}
-		err = ioutil.WriteFile(keyfilePath, buf, 0600)
-		if err != nil {
-			return nil, m.errf("could not save PEM: %v", err)
+			return nil, fmt.Errorf("could not save PEM: %v", err)
 		}
 	} else if err != nil {
-		return nil, m.errf("unexpected error encountered: %v", err)
+		return nil, fmt.Errorf("unexpected error: %v", err)
 	}
 
-	return store, nil
+	// grab key
+	key, ok := store.ECPrivateKey()
+	if !ok {
+		return nil, fmt.Errorf("%s does not contain ec private key", keyfile)
+	}
+
+	return key, nil
 }
 
 // cachedCert retrieves the certificate on disk for domain, and extracting the
 // expiry date.
 func (m *Manager) cachedCert(domain string) (crypto.Signer, time.Time, error) {
-	certPath := m.CacheDir + "/" + domain
-
-	store := pemutil.Store{}
-	err := store.LoadFile(certPath)
+	certPath := filepath.Join(m.CacheDir, domain+certSuffix)
+	store, err := pemutil.LoadFile(certPath)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, time.Time{}, err
 	}
 
-	cert, ok := store[pemutil.Certificate].(*x509.Certificate)
+	cert, ok := store.Certificate()
 	if !ok {
-		return nil, time.Time{}, errors.New("cached file does not contain certificate")
+		return nil, time.Time{}, fmt.Errorf("%s does not contain a certificate", certPath)
 	}
 
+	// extract signer, time
 	cert = cert
 
 	return nil, time.Time{}, nil
