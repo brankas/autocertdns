@@ -17,7 +17,7 @@ const (
 
 // Client wraps a DigitalOcean godo.Client.
 type Client struct {
-	*godo.Client
+	client *godo.Client
 	domain string
 	logf   func(string, ...interface{})
 	errf   func(string, ...interface{})
@@ -47,8 +47,8 @@ func New(opts ...Option) (*Client, error) {
 		}
 	}
 
-	if c.domain == "" || c.Client == nil {
-		return nil, errors.New("godop missing domain and client")
+	if c.domain == "" || c.client == nil {
+		return nil, errors.New("godop missing domain or godo client")
 	}
 
 	return c, nil
@@ -72,7 +72,7 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 
 	// create dns record
 	c.logf("provisioning (type: %s, name: %s, token: %s)", typ, name, token)
-	_, _, err := c.Domains.CreateRecord(ctxt, c.domain, &godo.DomainRecordEditRequest{
+	_, _, err := c.client.Domains.CreateRecord(ctxt, c.domain, &godo.DomainRecordEditRequest{
 		Type: allowedRecordType,
 		Name: name,
 		Data: token,
@@ -106,7 +106,7 @@ func (c *Client) Unprovision(ctxt context.Context, typ, name, token string) erro
 
 	// get current records
 	//c.logf("retrieving records (type: %s, name: %s, token: %s)", typ, name, token)
-	records, _, err := c.Domains.Records(ctxt, c.domain, &godo.ListOptions{PerPage: 10000})
+	records, _, err := c.client.Domains.Records(ctxt, c.domain, &godo.ListOptions{PerPage: 10000})
 	if err != nil {
 		c.errf("could not retrieve records (type: %s, name: %s, token: %s): %v", typ, name, token, err)
 		return err
@@ -120,7 +120,7 @@ func (c *Client) Unprovision(ctxt context.Context, typ, name, token string) erro
 		}
 
 		c.logf("unprovisioning (type: %s, name: %s, token: %s)", typ, name, token)
-		_, err = c.Domains.DeleteRecord(ctxt, c.domain, record.ID)
+		_, err = c.client.Domains.DeleteRecord(ctxt, c.domain, record.ID)
 		if err != nil {
 			c.errf("unable to unprovision (type: %s, name: %s, token: %s): %v", typ, name, token, err)
 		} /*else {

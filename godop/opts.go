@@ -9,30 +9,30 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Option is the client option type.
+// Option is the Client option type.
 type Option func(c *Client) error
 
-// WithDomain is a client option to configure the domain.
-func WithDomain(domain string) Option {
+// Domain is a Client option to set the domain.
+func Domain(domain string) Option {
 	return func(c *Client) error {
 		c.domain = domain
 		return nil
 	}
 }
 
-// WithClient is a client option to pass an already created godo client.
-func WithClient(client *godo.Client) Option {
+// GodoClient is a Client option to pass an already created godo client.
+func GodoClient(client *godo.Client) Option {
 	return func(c *Client) error {
-		c.Client = client
+		c.client = client
 		return nil
 	}
 }
 
-// FromClientToken is a client option to pass only the godo client token, and a
+// GodoClientToken is a Client option to pass only the godo client token, and a
 // new godo client will be created.
-func FromClientToken(ctxt context.Context, token string) Option {
+func GodoClientToken(ctxt context.Context, token string) Option {
 	return func(c *Client) error {
-		return WithClient(godo.NewClient(oauth2.NewClient(
+		return GodoClient(godo.NewClient(oauth2.NewClient(
 			ctxt,
 			oauth2.StaticTokenSource(
 				&oauth2.Token{
@@ -43,29 +43,29 @@ func FromClientToken(ctxt context.Context, token string) Option {
 	}
 }
 
-// FromClientTokenFile is a client option to create a new godo client using a
-// token stored in file on disk.
-func FromClientTokenFile(ctxt context.Context, filename string) Option {
+// GodoClientTokenFile is a Client option to create a new godo client using a
+// token stored in a file on disk.
+func GodoClientTokenFile(ctxt context.Context, filename string) Option {
 	return func(c *Client) error {
 		tok, err := ioutil.ReadFile(filename)
 		if err != nil {
 			return err
 		}
 
-		return FromClientToken(ctxt, string(bytes.TrimSpace(tok)))(c)
+		return GodoClientToken(ctxt, string(bytes.TrimSpace(tok)))(c)
 	}
 }
 
-// WithLogf is a client option to specify the logging function used.
-func WithLogf(f func(string, ...interface{})) Option {
+// Logf is a Client option to specify the logging function used.
+func Logf(f func(string, ...interface{})) Option {
 	return func(c *Client) error {
 		c.logf = f
 		return nil
 	}
 }
 
-// WithErrorf is a client option to specify the error logging function used.
-func WithErrorf(f func(string, ...interface{})) Option {
+// Errorf is a Client option to specify the error logging function used.
+func Errorf(f func(string, ...interface{})) Option {
 	return func(c *Client) error {
 		c.errf = f
 		return nil
