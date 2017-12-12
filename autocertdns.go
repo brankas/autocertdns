@@ -49,6 +49,14 @@ const (
 	LetsEncryptStagingURL = "https://acme-staging.api.letsencrypt.org/directory"
 )
 
+var (
+	// ErrInvalidCertificate is the invalid certificate error.
+	ErrInvalidCertificate = errors.New("invalid certificate")
+
+	// ErrCertificateExpired is the certificate expired error.
+	ErrCertificateExpired = errors.New("certificate expired")
+)
+
 // Provisioner is the shared interface for providers that can provision DNS
 // records.
 type Provisioner interface {
@@ -129,13 +137,57 @@ func (m *Manager) errf(s string, v ...interface{}) error {
 // Manager.DirCache, if that fails then an attempt will be made to create/renew
 // a certificate based on the Manager configuration.
 func (m *Manager) loadOrRenew(ctxt context.Context) error {
-	certPath := filepath.Join(m.CacheDir, m.Domain+certSuffix)
-	buf, err := ioutil.ReadFile(certPath)
+	err := m.load()
 	if err == nil {
-		//return m.load(buf)
+		return nil
+	}
+	return m.renew(ctxt)
+}
+
+// load loads a cached certificate on disk (if it exists), and decoding the PEM
+// encoded CERTIFICATE blocks, and loading the appropriate certificate leaf as
+// a tls certificate.
+func (m *Manager) load() error {
+	m.rw.Lock()
+	defer m.rw.Unlock()
+
+	certKey, err := m.cachedKey(m.Domain + keySuffix)
+	if err != nil {
+		return err
 	}
 
-	buf = buf
+	buf, err := ioutil.ReadFile(filepath.Join(m.CacheDir, m.Domain+certSuffix))
+	if err != nil {
+		return err
+	}
+
+	var b *pem.Block
+	var der [][]byte
+	for {
+		b, buf = pem.Decode(buf)
+		if b.Type != "CERTIFICATE" {
+			return ErrInvalidCertificate
+		}
+		der = append(der, b.Bytes)
+		if buf == nil {
+			break
+		}
+	}
+
+	leaf, err := parseCert(m.Domain, der, certKey)
+	if err != nil {
+		return err
+	}
+
+	if time.Now().After(leaf.NotAfter) {
+		return ErrCertificateExpired
+	}
+
+	m.cert = &tls.Certificate{
+		Certificate: der,
+		Leaf:        leaf,
+		PrivateKey:  certKey,
+	}
 
 	return nil
 }
