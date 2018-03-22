@@ -5,6 +5,7 @@ package gcdnsp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -47,13 +48,7 @@ func New(opts ...Option) (*Client, error) {
 	var err error
 
 	c := &Client{
-		logf: func(string, ...interface{}) {},
-		nameservers: []string{
-			"ns-cloud-b1.googledomains.com:53",
-			"ns-cloud-b2.googledomains.com:53",
-			"ns-cloud-b3.googledomains.com:53",
-			"ns-cloud-b4.googledomains.com:53",
-		},
+		logf:            func(string, ...interface{}) {},
 		propagationWait: DefaultPropagationWait,
 		checkDelay:      DefaultCheckDelay,
 		provisionDelay:  DefaultProvisionDelay,
@@ -80,6 +75,21 @@ func New(opts ...Option) (*Client, error) {
 
 	// force end .
 	c.domain = strings.TrimSuffix(c.domain, ".")
+
+	// no nameservers supplied, use the nameservers from the managed zone
+	if c.nameservers == nil {
+		mz, err := c.dnsService.ManagedZones.Get(c.projectID, c.managedZone).Do()
+		if err != nil {
+			return nil, fmt.Errorf("could not retrieve nameservers for %s/%s: %v", c.projectID, c.managedZone, err)
+		}
+
+		// add port to nameservers
+		ns := make([]string, len(mz.NameServers))
+		for i, n := range mz.NameServers {
+			ns[i] = n + ":53"
+		}
+		c.nameservers = ns
+	}
 
 	return c, nil
 }
@@ -131,8 +141,7 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 		ns := nn
 		eg.Go(func() error {
 			// create dnsr client and question
-			cl := new(dnsr.Client)
-			m := new(dnsr.Msg)
+			cl, m := new(dnsr.Client), new(dnsr.Msg)
 			m.SetQuestion(name, dnsr.TypeTXT)
 			for {
 				select {
@@ -144,6 +153,7 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 					if err == nil && len(res.Answer) > 0 {
 						for _, a := range res.Answer {
 							if txtRecord, ok := a.(*dnsr.TXT); ok && contains(txtRecord.Txt, token) {
+								c.logf("%s has propagated to %s", name, ns)
 								return nil
 							}
 						}
@@ -156,8 +166,7 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 		})
 	}
 
-	err = eg.Wait()
-	if err != nil {
+	if err = eg.Wait(); err != nil {
 		return err
 	}
 

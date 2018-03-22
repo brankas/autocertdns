@@ -10,9 +10,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/brankas/autocertdns/gcdnsp"
 	"github.com/brankas/autocertdns/godop"
+)
+
+const (
+	gcdnspManagedZone = "dns-ken"
+	gcdnspDomain      = "ken.dev.brank.as"
+	godopDomain       = "godo." + gcdnspDomain
 )
 
 func TestRenewGoogleCloudDNS(t *testing.T) {
@@ -27,8 +34,11 @@ func TestRenewGoogleCloudDNS(t *testing.T) {
 
 	// create google cloud dns provisioner
 	client, err := gcdnsp.New(
-		gcdnsp.ManagedZone("dev-dns"), gcdnsp.Domain("dev.brank.as"),
+		gcdnsp.ManagedZone(gcdnspManagedZone),
+		gcdnsp.Domain(gcdnspDomain),
 		gcdnsp.GoogleServiceAccountCredentialsJSON([]byte(creds)),
+		gcdnsp.PropagationWait(180*time.Second),
+		gcdnsp.ProvisionDelay(30*time.Second),
 		gcdnsp.Logf(t.Logf),
 	)
 	if err != nil {
@@ -39,7 +49,7 @@ func TestRenewGoogleCloudDNS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not generate random host, got: %v", err)
 	}
-	host += ".dev.brank.as"
+	host += "." + gcdnspDomain
 
 	m := &Manager{
 		DirectoryURL: LetsEncryptStagingURL,
@@ -94,7 +104,7 @@ func TestRenewGodop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not generate random host, got: %v", err)
 	}
-	host += ".test.brank.as"
+	host += "." + godopDomain
 
 	m := &Manager{
 		DirectoryURL: LetsEncryptStagingURL,
