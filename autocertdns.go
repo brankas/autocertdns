@@ -137,8 +137,7 @@ func (m *Manager) errf(s string, v ...interface{}) error {
 // Manager.DirCache, if that fails then an attempt will be made to create/renew
 // a certificate based on the Manager configuration.
 func (m *Manager) loadOrRenew(ctxt context.Context) error {
-	err := m.load()
-	if err == nil {
+	if err := m.load(); err == nil {
 		return nil
 	}
 	return m.renew(ctxt)
@@ -165,6 +164,9 @@ func (m *Manager) load() error {
 	var der [][]byte
 	for {
 		b, buf = pem.Decode(buf)
+		if b == nil {
+			break
+		}
 		if b.Type != "CERTIFICATE" {
 			return ErrInvalidCertificate
 		}
@@ -172,6 +174,9 @@ func (m *Manager) load() error {
 		if buf == nil {
 			break
 		}
+	}
+	if len(der) == 0 {
+		return ErrInvalidCertificate
 	}
 
 	leaf, err := parseCert(m.Domain, der, certKey)
@@ -471,6 +476,7 @@ func parseCert(domain string, der [][]byte, key crypto.Signer) (leaf *x509.Certi
 	if err := leaf.VerifyHostname(domain); err != nil {
 		return nil, err
 	}
+
 	// ensure the leaf corresponds to the private key
 	switch pub := leaf.PublicKey.(type) {
 	case *rsa.PublicKey:
@@ -481,6 +487,7 @@ func parseCert(domain string, der [][]byte, key crypto.Signer) (leaf *x509.Certi
 		if pub.N.Cmp(prv.N) != 0 {
 			return nil, errors.New("private key does not match public key")
 		}
+
 	case *ecdsa.PublicKey:
 		prv, ok := key.(*ecdsa.PrivateKey)
 		if !ok {
@@ -489,6 +496,7 @@ func parseCert(domain string, der [][]byte, key crypto.Signer) (leaf *x509.Certi
 		if pub.X.Cmp(prv.X) != 0 || pub.Y.Cmp(prv.Y) != 0 {
 			return nil, errors.New("private key does not match public key")
 		}
+
 	default:
 		return nil, errors.New("unknown public key algorithm")
 	}
