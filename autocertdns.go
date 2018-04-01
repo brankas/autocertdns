@@ -14,7 +14,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -49,12 +48,38 @@ const (
 	LetsEncryptStagingURL = "https://acme-staging.api.letsencrypt.org/directory"
 )
 
-var (
+// Error is a autocertdns error.
+type Error string
+
+// Error satisfies the error interface.
+func (err Error) Error() string {
+	return string(err)
+}
+
+// Error values.
+const (
 	// ErrInvalidCertificate is the invalid certificate error.
-	ErrInvalidCertificate = errors.New("invalid certificate")
+	ErrInvalidCertificate Error = "invalid certificate"
 
 	// ErrCertificateExpired is the certificate expired error.
-	ErrCertificateExpired = errors.New("certificate expired")
+	ErrCertificateExpired Error = "certificate expired"
+
+	// ErrNoPublicKeyFound is the no public key found error.
+	ErrNoPublicKeyFound Error = "no public key found"
+
+	// ErrCertificateNotYetValid is the certificate not yet valid error.
+	ErrCertificateNotYetValid Error = "certificate not valid yet"
+
+	// ErrPrivateKeyTypeDoesNotMatchPublicKeyType is the private key type does
+	// not match public key type error.
+	ErrPrivateKeyTypeDoesNotMatchPublicKeyType Error = "private key type does not match public key type"
+
+	// ErrPrivateKeyTypeDoesNotMatchPublicKey is the private key does not match
+	// public key error.
+	ErrPrivateKeyDoesNotMatchPublicKey Error = "private key does not match public key"
+
+	// ErrUnknownPublicKeyAlgorithm is the unknown public key algorithm error.
+	ErrUnknownPublicKeyAlgorithm Error = "unknown public key algorithm"
 )
 
 // Provisioner is the shared interface for providers that can provision DNS
@@ -462,16 +487,17 @@ func parseCert(domain string, der [][]byte, key crypto.Signer) (leaf *x509.Certi
 	}
 	x509Cert, err := x509.ParseCertificates(pub)
 	if len(x509Cert) == 0 {
-		return nil, errors.New("no public key found")
+		return nil, ErrNoPublicKeyFound
+
 	}
 	// verify the leaf is not expired and matches the domain name
 	leaf = x509Cert[0]
 	now := time.Now()
 	if now.Before(leaf.NotBefore) {
-		return nil, errors.New("certificate is not valid yet")
+		return nil, ErrCertificateNotYetValid
 	}
 	if now.After(leaf.NotAfter) {
-		return nil, errors.New("expired certificate")
+		return nil, ErrCertificateExpired
 	}
 	if err := leaf.VerifyHostname(domain); err != nil {
 		return nil, err
@@ -482,23 +508,23 @@ func parseCert(domain string, der [][]byte, key crypto.Signer) (leaf *x509.Certi
 	case *rsa.PublicKey:
 		prv, ok := key.(*rsa.PrivateKey)
 		if !ok {
-			return nil, errors.New("private key type does not match public key type")
+			return nil, ErrPrivateKeyTypeDoesNotMatchPublicKeyType
 		}
 		if pub.N.Cmp(prv.N) != 0 {
-			return nil, errors.New("private key does not match public key")
+			return nil, ErrPrivateKeyDoesNotMatchPublicKey
 		}
 
 	case *ecdsa.PublicKey:
 		prv, ok := key.(*ecdsa.PrivateKey)
 		if !ok {
-			return nil, errors.New("private key type does not match public key type")
+			return nil, ErrPrivateKeyTypeDoesNotMatchPublicKeyType
 		}
 		if pub.X.Cmp(prv.X) != 0 || pub.Y.Cmp(prv.Y) != 0 {
-			return nil, errors.New("private key does not match public key")
+			return nil, ErrPrivateKeyDoesNotMatchPublicKey
 		}
 
 	default:
-		return nil, errors.New("unknown public key algorithm")
+		return nil, ErrUnknownPublicKeyAlgorithm
 	}
 	return leaf, nil
 }
