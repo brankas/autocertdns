@@ -221,3 +221,9 @@ func Errorf(f func(string, ...interface{})) Option {
 		return nil
 	}
 }
+
+// IgnorePropagationErrors is a Client option to ignore propagation errors.
+func IgnorePropagationErrors(c *Client) error {
+	c.ignorePropagationErrors = true
+	return nil
+}

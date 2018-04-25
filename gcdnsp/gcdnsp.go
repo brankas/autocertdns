@@ -30,16 +30,17 @@ const (
 
 // Client wraps a Google Cloud DNS service.
 type Client struct {
-	projectID       string
-	managedZone     string
-	domain          string
-	nameservers     []string
-	dnsService      *dns.Service
-	propagationWait time.Duration
-	checkDelay      time.Duration
-	provisionDelay  time.Duration
-	logf            func(string, ...interface{})
-	errf            func(string, ...interface{})
+	projectID               string
+	managedZone             string
+	domain                  string
+	nameservers             []string
+	dnsService              *dns.Service
+	propagationWait         time.Duration
+	checkDelay              time.Duration
+	provisionDelay          time.Duration
+	ignorePropagationErrors bool
+	logf                    func(string, ...interface{})
+	errf                    func(string, ...interface{})
 }
 
 // New wraps a Google Cloud DNS Service in order to handle DNS provisioning
@@ -56,8 +57,7 @@ func New(opts ...Option) (*Client, error) {
 
 	// apply opts
 	for _, o := range opts {
-		err = o(c)
-		if err != nil {
+		if err = o(c); err != nil {
 			return nil, err
 		}
 	}
@@ -75,21 +75,6 @@ func New(opts ...Option) (*Client, error) {
 
 	// force end .
 	c.domain = strings.TrimSuffix(c.domain, ".")
-
-	// no nameservers supplied, use the nameservers from the managed zone
-	if c.nameservers == nil {
-		mz, err := c.dnsService.ManagedZones.Get(c.projectID, c.managedZone).Do()
-		if err != nil {
-			return nil, fmt.Errorf("could not retrieve nameservers for %s/%s: %v", c.projectID, c.managedZone, err)
-		}
-
-		// add port to nameservers
-		ns := make([]string, len(mz.NameServers))
-		for i, n := range mz.NameServers {
-			ns[i] = n + ":53"
-		}
-		c.nameservers = ns
-	}
 
 	return c, nil
 }
@@ -110,11 +95,35 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 	}
 	name += "."
 
+	// no nameservers supplied, use the nameservers from the managed zone
+	if c.nameservers == nil {
+		mz, err := c.dnsService.ManagedZones.Get(c.projectID, c.managedZone).Context(ctxt).Do()
+		if err != nil {
+			return fmt.Errorf("could not retrieve nameservers for %s/%s: %v", c.projectID, c.managedZone, err)
+		}
+
+		// add port to nameservers
+		ns := make([]string, len(mz.NameServers))
+		for i, n := range mz.NameServers {
+			ns[i] = n + ":53"
+		}
+		c.nameservers = ns
+	}
+
 	// create dns record
 	c.logf("provisioning (type: %s, name: %s, token: %s)", typ, name, token)
-	_, err := dns.NewChangesService(c.dnsService).Create(
+
+	// build deletions
+	deletions, err := c.buildDeletions(ctxt, typ, name)
+	if err != nil {
+		return err
+	}
+
+	// do change
+	_, err = c.dnsService.Changes.Create(
 		c.projectID, c.managedZone,
 		&dns.Change{
+			Deletions: deletions,
 			Additions: []*dns.ResourceRecordSet{
 				&dns.ResourceRecordSet{
 					Type:    typ,
@@ -124,7 +133,7 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 				},
 			},
 		},
-	).Do()
+	).Context(ctxt).Do()
 	if err != nil {
 		c.errf("unable to provision (type: %s, name: %s, token: %s): %v", typ, name, token, err)
 		return err
@@ -166,8 +175,10 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 		})
 	}
 
-	if err = eg.Wait(); err != nil {
+	if err = eg.Wait(); err != nil && !c.ignorePropagationErrors {
 		return err
+	} else if err != nil {
+		c.errf("ignored propagated error: %v", err)
 	}
 
 	time.Sleep(c.provisionDelay)
@@ -193,41 +204,22 @@ func (c *Client) Unprovision(ctxt context.Context, typ, name, token string) erro
 	}
 	name += "."
 
-	// get current records
-	//c.logf("retrieving records (type: %s, name: %s, token: %s)", typ, name, token)
-	req := dns.NewResourceRecordSetsService(c.dnsService).List(
-		c.projectID, c.managedZone,
-	)
-
-	// find rrsets to delete if TXT record and token matches
-	var deletions []*dns.ResourceRecordSet
-	if err = req.Pages(ctxt, func(page *dns.ResourceRecordSetsListResponse) error {
-		for _, rrSet := range page.Rrsets {
-			//log.Printf(">>>> name: %s, type: %s, rrdatas: %v", rrSet.Name, rrSet.Type, rrSet.Rrdatas)
-			if rrSet.Name != name || rrSet.Type != allowedRecordType || !contains(rrSet.Rrdatas, token) {
-				continue
-			}
-			deletions = append(deletions, rrSet)
-		}
-		return nil
-
-	}); err != nil {
-		c.errf("could not retrieve records (type: %s, name: %s, token: %s): %v", typ, name, token, err)
+	// get rrsets to delete
+	deletions, err := c.buildDeletions(ctxt, typ, name)
+	if err != nil {
 		return err
 	}
-
 	if len(deletions) < 1 {
-		c.errf("could not find record (type: %s, name: %s, token: %s)", typ, name, token)
 		return nil
 	}
 
 	c.logf("unprovisioning (type: %s, name: %s, token: %s)", typ, name, token)
-	_, err = dns.NewChangesService(c.dnsService).Create(
+	_, err = c.dnsService.Changes.Create(
 		c.projectID, c.managedZone,
 		&dns.Change{
 			Deletions: deletions,
 		},
-	).Do()
+	).Context(ctxt).Do()
 	if err != nil {
 		c.errf("unable to unprovision (type: %s, name: %s, token: %s): %v", typ, name, token, err)
 		return err
@@ -235,6 +227,32 @@ func (c *Client) Unprovision(ctxt context.Context, typ, name, token string) erro
 		c.logf("successfully unprovisioned (type: %s, name: %s, token: %s)", typ, name, token)
 	}*/
 	return nil
+}
+
+// buildDeletions builds list of record sets to delete.
+func (c *Client) buildDeletions(ctxt context.Context, typ, name string) ([]*dns.ResourceRecordSet, error) {
+	// get current records
+	//c.logf("retrieving records (type: %s, name: %s, token: %s)", typ, name, token)
+	req := c.dnsService.ResourceRecordSets.List(
+		c.projectID, c.managedZone,
+	)
+
+	var deletions []*dns.ResourceRecordSet
+	if err := req.Pages(ctxt, func(page *dns.ResourceRecordSetsListResponse) error {
+		for _, rrSet := range page.Rrsets {
+			//log.Printf(">>>> name: %s, type: %s, rrdatas: %v", rrSet.Name, rrSet.Type, rrSet.Rrdatas)
+			if rrSet.Name != name || rrSet.Type != allowedRecordType {
+				continue
+			}
+			deletions = append(deletions, rrSet)
+		}
+		return nil
+
+	}); err != nil {
+		c.errf("could not retrieve records (type: %s, name: %s): %v", typ, name, err)
+		return nil, err
+	}
+	return deletions, nil
 }
 
 // contains returns true if haystack contains needle.

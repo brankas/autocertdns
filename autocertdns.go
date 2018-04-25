@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -175,12 +176,14 @@ func (m *Manager) load() error {
 	m.rw.Lock()
 	defer m.rw.Unlock()
 
-	certKey, err := m.cachedKey(m.Domain + keySuffix)
+	domain := strings.TrimSuffix(m.Domain, ".")
+
+	certKey, err := m.cachedKey(domain + keySuffix)
 	if err != nil {
 		return err
 	}
 
-	buf, err := ioutil.ReadFile(filepath.Join(m.CacheDir, m.Domain+certSuffix))
+	buf, err := ioutil.ReadFile(filepath.Join(m.CacheDir, domain+certSuffix))
 	if err != nil {
 		return err
 	}
@@ -204,7 +207,7 @@ func (m *Manager) load() error {
 		return ErrInvalidCertificate
 	}
 
-	leaf, err := parseCert(m.Domain, der, certKey)
+	leaf, err := parseCert(domain, der, certKey)
 	if err != nil {
 		return err
 	}
@@ -265,8 +268,11 @@ func (m *Manager) renew(ctxt context.Context) error {
 		return m.errf("could not register with ACME server: %v", err)
 	}
 
+	// normalize domain name
+	domain := strings.TrimSuffix(m.Domain, ".")
+
 	// create authorize challenges
-	authz, err := client.Authorize(ctxt, m.Domain)
+	authz, err := client.Authorize(ctxt, domain)
 	if err != nil {
 		return m.errf("could not authorize with ACME server: %v", err)
 	}
@@ -290,11 +296,11 @@ func (m *Manager) renew(ctxt context.Context) error {
 	}
 
 	// provision TXT under _acme-challenge.<domain>
-	err = m.Provisioner.Provision(ctxt, "TXT", acmeChallengeDomainPrefix+m.Domain, tok)
+	err = m.Provisioner.Provision(ctxt, "TXT", acmeChallengeDomainPrefix+domain, tok)
 	if err != nil {
 		return m.errf("could not provision dns-01 TXT challenge: %v", err)
 	}
-	defer m.Provisioner.Unprovision(ctxt, "TXT", acmeChallengeDomainPrefix+m.Domain, tok)
+	defer m.Provisioner.Unprovision(ctxt, "TXT", acmeChallengeDomainPrefix+domain, tok)
 
 	// accept challenge
 	_, err = client.Accept(ctxt, challenge)
@@ -311,14 +317,14 @@ func (m *Manager) renew(ctxt context.Context) error {
 	}
 
 	// grab domain key
-	certKey, err := m.cachedKey(m.Domain + keySuffix)
+	certKey, err := m.cachedKey(domain + keySuffix)
 	if err != nil {
 		return m.errf("could not load domain key: %v", err)
 	}
 
 	// create certificate signing request
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-		Subject: pkix.Name{CommonName: m.Domain},
+		Subject: pkix.Name{CommonName: domain},
 	}, certKey)
 	if err != nil {
 		return m.errf("could not create certificate signing request: %v", err)
@@ -329,7 +335,7 @@ func (m *Manager) renew(ctxt context.Context) error {
 	if err != nil {
 		return m.errf("could not create certificate: %v", err)
 	}
-	leaf, err := parseCert(m.Domain, der, certKey)
+	leaf, err := parseCert(domain, der, certKey)
 	if err != nil {
 		return m.errf("could not parse certificate: %v", err)
 	}
@@ -344,13 +350,13 @@ func (m *Manager) renew(ctxt context.Context) error {
 	}
 
 	// cache certificate
-	certPath := filepath.Join(m.CacheDir, m.Domain+certSuffix)
+	certPath := filepath.Join(m.CacheDir, domain+certSuffix)
 	err = ioutil.WriteFile(certPath, buf.Bytes(), 0600)
 	if err != nil {
 		return m.errf("could not write to %s: %v", certPath, err)
 	}
 
-	m.log("created certificate (domain: %s, url: %s, expires: %s)", m.Domain, urlstr, leaf.NotAfter.Format(time.RFC3339))
+	m.log("created certificate (domain: %s, url: %s, expires: %s)", domain, urlstr, leaf.NotAfter.Format(time.RFC3339))
 	m.cert = &tls.Certificate{
 		Certificate: der,
 		Leaf:        leaf,
