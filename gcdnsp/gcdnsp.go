@@ -120,7 +120,8 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 	}
 
 	// do change
-	_, err = c.dnsService.Changes.Create(
+	var chg *dns.Change
+	chg, err = c.dnsService.Changes.Create(
 		c.projectID, c.managedZone,
 		&dns.Change{
 			Deletions: deletions,
@@ -140,6 +141,15 @@ func (c *Client) Provision(ctxt context.Context, typ, name, token string) error 
 	} /*else {
 		c.logf("successfully provisioned (type: %s, name: %s, token: %s)", typ, name, token)
 	}*/
+
+	// check pending status
+	for chg.Status == "pending" {
+		time.Sleep(1 * time.Second)
+		chg, err = c.dnsService.Changes.Get(c.projectID, c.managedZone, chg.Id).Context(ctxt).Do()
+		if err != nil {
+			return err
+		}
+	}
 
 	var cancel func()
 	ctxt, cancel = context.WithTimeout(ctxt, c.propagationWait)
