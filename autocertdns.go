@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/knq/pemutil"
+	"github.com/kenshaw/pemutil"
 	"golang.org/x/crypto/acme"
 )
 
@@ -494,7 +494,6 @@ func parseCert(domain string, der [][]byte, key crypto.Signer) (leaf *x509.Certi
 	x509Cert, err := x509.ParseCertificates(pub)
 	if len(x509Cert) == 0 {
 		return nil, ErrNoPublicKeyFound
-
 	}
 	// verify the leaf is not expired and matches the domain name
 	leaf = x509Cert[0]

@@ -11,7 +11,7 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"cloud.google.com/go/compute/metadata"
-	"github.com/knq/jwt/gserviceaccount"
+	"github.com/kenshaw/jwt/gserviceaccount"
 
 	dns "google.golang.org/api/dns/v2beta1"
 )

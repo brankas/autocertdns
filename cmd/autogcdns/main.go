@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knq/jwt/gserviceaccount"
+	"github.com/kenshaw/jwt/gserviceaccount"
 	"golang.org/x/crypto/acme/autocert"
 	dns "google.golang.org/api/dns/v2beta1"
 
@@ -65,7 +65,7 @@ func run(ctxt context.Context) error {
 	}
 
 	// build service account token source
-	gsa, err := gserviceaccount.FromJSON(buf, gserviceaccount.Transport(transportFromEnv()))
+	gsa, err := gserviceaccount.FromJSON(buf, gserviceaccount.WithTransport(transportFromEnv()))
 	if err != nil {
 		return err
 	}
